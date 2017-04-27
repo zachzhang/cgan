@@ -19,7 +19,7 @@ class Generator(nn.Module):
 
         self.latent_vars = 100
 
-        self.g_fc = nn.Linear(self.latent_vars, 512)
+        self.g_fc = nn.Linear(self.latent_vars + 10, 512)
 
         self.dconv1 = nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2)
         self.dconv2 = nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2)
@@ -31,7 +31,10 @@ class Generator(nn.Module):
         self.bn2 = nn.BatchNorm2d(256)
         self.bn1 = nn.BatchNorm2d(512)
 
-    def forward(self, x):
+    def forward(self, x , y):
+
+        x = torch.cat([x, y], 1)
+
         x = F.relu(self.g_fc(x))
         x = x.view(-1, 512, 1, 1)
         x = F.relu(self.bn2(self.dconv1(x)))
@@ -56,15 +59,24 @@ class Discriminator(nn.Module):
         self.bn3 = nn.BatchNorm2d(256)
         self.bn4 = nn.BatchNorm2d(512)
 
-        self.d_fc = nn.Linear(512, 1)
+        self.d_fc = nn.Linear(512 +10, 256)
 
-    def forward(self, x):
+        self.merge_layer = nn.Linear(256 , 1)
+
+
+
+    def forward(self, x , y):
         x = self.bn1(F.leaky_relu(self.conv1(x), .2))
         x = self.bn2(F.leaky_relu(self.conv2(x), .2))
         x = self.bn3(F.leaky_relu(self.conv3(x), .2))
         x = self.bn4(F.leaky_relu(self.conv4(x), .2))
         x = x.view(-1, 512)
-        x = F.sigmoid(self.d_fc(x))
+
+        x = torch.cat( [ x , y ], 1)
+
+        x = F.leaky_relu(self.d_fc(x) , .2)
+
+        x = F.sigmoid(self.merge_layer(x))
 
         return (x)
 
@@ -106,33 +118,31 @@ zeros_label = Variable(torch.zeros(mb_size))
 
 bce = nn.BCELoss()
 
-for e in range(20):
+for e in range(4):
 
     avg_d_loss_real = 0
     avg_d_loss_fake = 0
     avg_g_loss = 0
     iterator = iter(train_loader)
 
-    #for i in range(len(train_loader)):
-    for i in range(300):
+    for i in range(len(train_loader)):
+    #for i in range(10):
 
         X, y = iterator.next()
 
         if X.size()[0] != mb_size:
             continue
 
-        X = Variable(X)
-
-        y = Variable(one_hot(y))
+        X , y  = Variable(X) , Variable(one_hot(y))
 
         z = Variable(torch.randn(mb_size, Z_dim))
 
         D.zero_grad()
 
         # Dicriminator forward-loss-backward-update
-        G_sample = G(z).detach()
-        D_real = D(X)
-        D_fake = D(G_sample)
+        G_sample = G(z,y).detach()
+        D_real = D(X,y)
+        D_fake = D(G_sample,y)
 
         D_loss_real = F.binary_cross_entropy(D_real, ones_label)
         D_loss_fake = F.binary_cross_entropy(D_fake, zeros_label)
@@ -146,8 +156,8 @@ for e in range(20):
         G.zero_grad()
         # Generator forward-loss-backward-update
         z = Variable(torch.randn(mb_size, Z_dim))
-        G_sample = G(z)
-        D_fake = D(G_sample)
+        G_sample = G(z,y)
+        D_fake = D(G_sample,y)
 
         G_loss = F.binary_cross_entropy(D_fake, ones_label)
 
@@ -160,8 +170,7 @@ for e in range(20):
 
     y = (torch.ones(64) * 7).long()
     y = Variable(one_hot(y))
-    samples = G(z)[:30]
-
+    samples = G(z,y)[:30]
 
     img = torchvision.utils.make_grid( samples.data)
 
